@@ -59,15 +59,23 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
                         e.printStackTrace()
                     }
                     val postData = map["postData"] ?: ""
-
-                    var offerSdp = postData
-                    var isJson = false
+                    
+                    var offerSdp = ""
                     if (postData.trim().startsWith("{")) {
-                        isJson = true
                         try {
                             val jsonObj = org.json.JSONObject(postData)
-                            offerSdp = jsonObj.optString("sdp", "")
-                        } catch (e: Exception) {}
+                            val requestType = jsonObj.optString("type", "")
+                            
+                            // 兼容可能有直接带sdp的情况
+                            if (jsonObj.has("sdp")) {
+                                offerSdp = jsonObj.optString("sdp", "")
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    } else {
+                        // Fallback fallback raw SDP text
+                        offerSdp = postData
                     }
 
                     var answerSdp = ""
@@ -77,13 +85,14 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
                         }
                     }
 
-                    if (isJson) {
-                        try {
-                            val responseObj = org.json.JSONObject()
-                            responseObj.put("type", "answer")
-                            responseObj.put("sdp", answerSdp)
-                            return newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
-                        } catch (e: Exception) {}
+                    try {
+                        // camera-streamer 兼容格式
+                        val responseObj = org.json.JSONObject()
+                        responseObj.put("type", "answer")
+                        responseObj.put("sdp", answerSdp)
+                        return newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                     return newFixedLengthResponse(Response.Status.OK, "application/json", answerSdp)
                 }
