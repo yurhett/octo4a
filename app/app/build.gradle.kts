@@ -131,7 +131,7 @@ dependencies {
     implementation("com.bugsnag:bugsnag-android:5.12.0")
 
     // WebRTC
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    implementation("io.github.webrtc-sdk:android:125.6422.06.1")
 
     // Test dependencies
     testImplementation("junit:junit:4.13")
