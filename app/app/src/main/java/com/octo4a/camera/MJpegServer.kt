@@ -51,6 +51,15 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
                 return MjpegResponse(frameProvider)
             }
             "/webrtc" -> {
+                // Handling CORS Preflight
+                if (session.method == Method.OPTIONS) {
+                    val res = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+                    res.addHeader("Access-Control-Allow-Origin", "*")
+                    res.addHeader("Access-Control-Allow-Headers", "*")
+                    res.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                    return res
+                }
+                
                 if (session.method == Method.POST) {
                     val map = HashMap<String, String>()
                     try {
@@ -90,11 +99,15 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
                         val responseObj = org.json.JSONObject()
                         responseObj.put("type", "answer")
                         responseObj.put("sdp", answerSdp)
-                        return newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
+                        val res = newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
+                        res.addHeader("Access-Control-Allow-Origin", "*")
+                        return res
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", answerSdp)
+                    val res = newFixedLengthResponse(Response.Status.OK, "application/json", answerSdp)
+                    res.addHeader("Access-Control-Allow-Origin", "*")
+                    return res
                 }
                 return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Bad Request")
             }
