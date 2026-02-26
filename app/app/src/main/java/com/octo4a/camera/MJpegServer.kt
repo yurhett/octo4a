@@ -18,7 +18,9 @@ interface MJpegFrameProvider {
     fun getNewFrame(prevFrame: FrameInfo?): FrameInfo
     fun registerListener(): Boolean
     fun unregisterListener()
-    suspend fun processWebRTCOffer(offerSdp: String): String
+    suspend fun createWebRTCOffer(): Pair<String, String>
+    suspend fun processWebRTCAnswer(id: String, answerSdp: String): Boolean
+    fun addWebRTCIceCandidate(id: String, sdpMid: String?, sdpMLineIndex: Int, sdpCandidate: String)
 }
 
 // Simple http server hosting mjpeg stream along with
@@ -68,46 +70,82 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
                         e.printStackTrace()
                     }
                     val postData = map["postData"] ?: ""
-                    
-                    var offerSdp = ""
+
                     if (postData.trim().startsWith("{")) {
                         try {
                             val jsonObj = org.json.JSONObject(postData)
-                            val requestType = jsonObj.optString("type", "")
-                            
-                            // 兼容可能有直接带sdp的情况
-                            if (jsonObj.has("sdp")) {
-                                offerSdp = jsonObj.optString("sdp", "")
+                            when (jsonObj.optString("type", "")) {
+                                "request" -> {
+                                    var id = ""
+                                    var offerSdp = ""
+                                    kotlin.runCatching {
+                                        runBlocking {
+                                            val result = frameProvider.createWebRTCOffer()
+                                            id = result.first
+                                            offerSdp = result.second
+                                        }
+                                    }.onFailure { e ->
+                                        e.printStackTrace()
+                                    }
+                                    if (id.isEmpty() || offerSdp.isEmpty()) {
+                                        val res = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Failed to create WebRTC offer")
+                                        res.addHeader("Access-Control-Allow-Origin", "*")
+                                        return res
+                                    }
+                                    val responseObj = org.json.JSONObject()
+                                    responseObj.put("type", "offer")
+                                    responseObj.put("sdp", offerSdp)
+                                    responseObj.put("id", id)
+                                    responseObj.put("iceServers", org.json.JSONArray())
+                                    val res = newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
+                                    res.addHeader("Access-Control-Allow-Origin", "*")
+                                    return res
+                                }
+                                "answer" -> {
+                                    val id = jsonObj.optString("id", "")
+                                    val answerSdp = jsonObj.optString("sdp", "")
+                                    var success = false
+                                    kotlin.runCatching {
+                                        runBlocking {
+                                            success = frameProvider.processWebRTCAnswer(id, answerSdp)
+                                        }
+                                    }.onFailure { e ->
+                                        e.printStackTrace()
+                                    }
+                                    if (!success) {
+                                        val res = newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Failed to process WebRTC answer")
+                                        res.addHeader("Access-Control-Allow-Origin", "*")
+                                        return res
+                                    }
+                                    val res = newFixedLengthResponse(Response.Status.OK, "application/json", "{}")
+                                    res.addHeader("Access-Control-Allow-Origin", "*")
+                                    return res
+                                }
+                                "remote_candidate" -> {
+                                    val id = jsonObj.optString("id", "")
+                                    val candidates = jsonObj.optJSONArray("candidates")
+                                    candidates?.let {
+                                        for (i in 0 until it.length()) {
+                                            val candidateObj = it.optJSONObject(i)
+                                            if (candidateObj != null) {
+                                                frameProvider.addWebRTCIceCandidate(
+                                                    id,
+                                                    candidateObj.optString("sdpMid"),
+                                                    candidateObj.optInt("sdpMLineIndex"),
+                                                    candidateObj.optString("candidate")
+                                                )
+                                            }
+                                        }
+                                    }
+                                    val res = newFixedLengthResponse(Response.Status.OK, "application/json", "{}")
+                                    res.addHeader("Access-Control-Allow-Origin", "*")
+                                    return res
+                                }
                             }
                         } catch (e: Exception) {
                             e.printStackTrace()
                         }
-                    } else {
-                        // Fallback fallback raw SDP text
-                        offerSdp = postData
                     }
-
-                    var answerSdp = ""
-                    kotlin.runCatching {
-                        runBlocking {
-                            answerSdp = frameProvider.processWebRTCOffer(offerSdp)
-                        }
-                    }
-
-                    try {
-                        // camera-streamer 兼容格式
-                        val responseObj = org.json.JSONObject()
-                        responseObj.put("type", "answer")
-                        responseObj.put("sdp", answerSdp)
-                        val res = newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
-                        res.addHeader("Access-Control-Allow-Origin", "*")
-                        return res
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                    val res = newFixedLengthResponse(Response.Status.OK, "application/json", answerSdp)
-                    res.addHeader("Access-Control-Allow-Origin", "*")
-                    return res
                 }
                 return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Bad Request")
             }

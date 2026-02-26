@@ -41,6 +41,7 @@ import com.octo4a.utils.CancelableTimer
 import com.octo4a.utils.WaitableEvent
 import com.octo4a.utils.preferences.MainPreferences
 import org.koin.android.ext.android.inject
+import org.webrtc.IceCandidate
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
@@ -287,8 +288,16 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     fun getService(): CameraService = this@CameraService
   }
 
-  override suspend fun processWebRTCOffer(offerSdp: String): String {
-      return _webRTCManager.processOffer(offerSdp)
+  override suspend fun createWebRTCOffer(): Pair<String, String> {
+      return _webRTCManager.createOffer()
+  }
+
+  override suspend fun processWebRTCAnswer(id: String, answerSdp: String): Boolean {
+      return _webRTCManager.processAnswer(id, answerSdp)
+  }
+
+  override fun addWebRTCIceCandidate(id: String, sdpMid: String?, sdpMLineIndex: Int, sdpCandidate: String) {
+      _webRTCManager.addIceCandidate(id, IceCandidate(sdpMid, sdpMLineIndex, sdpCandidate))
   }
 
   private val binder = LocalBinder()

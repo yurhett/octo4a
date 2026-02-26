@@ -2,10 +2,10 @@ package com.octo4a.camera
 
 import android.content.Context
 import org.webrtc.*
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 class WebRTCManager(private val context: Context) {
 
@@ -13,8 +13,8 @@ class WebRTCManager(private val context: Context) {
     private var factory: PeerConnectionFactory? = null
     private var videoSource: VideoSource? = null
     private var localVideoTrack: VideoTrack? = null
-    
-    private val peerConnections = mutableListOf<PeerConnection>()
+
+    private val peerConnectionsById = ConcurrentHashMap<String, PeerConnection>()
 
     fun init() {
         PeerConnectionFactory.initialize(
@@ -53,19 +53,29 @@ class WebRTCManager(private val context: Context) {
         }
     }
 
-    suspend fun processOffer(offerSdp: String): String = suspendCoroutine { cont ->
+    // Creates an offer (server is the offerer, matching camera-streamer API).
+    // Returns a pair of (id, offerSdp). Waits for ICE gathering to complete.
+    suspend fun createOffer(): Pair<String, String> = suspendCoroutine { cont ->
         if (factory == null) {
-            cont.resume("")
+            cont.resume(Pair("", ""))
             return@suspendCoroutine
         }
-    
+
+        val id = UUID.randomUUID().toString()
+        val resumed = java.util.concurrent.atomic.AtomicBoolean(false)
+
         val peerConnection = factory?.createPeerConnection(
             PeerConnection.RTCConfiguration(emptyList()),
             object : PeerConnection.Observer {
                 override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
                 override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
                 override fun onIceConnectionReceivingChange(p0: Boolean) {}
-                override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
+                override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
+                    if (state == PeerConnection.IceGatheringState.COMPLETE && resumed.compareAndSet(false, true)) {
+                        val sdp = peerConnectionsById[id]?.localDescription?.description ?: ""
+                        cont.resume(if (sdp.isNotEmpty()) Pair(id, sdp) else Pair("", ""))
+                    }
+                }
                 override fun onIceCandidate(p0: IceCandidate?) {}
                 override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
                 override fun onAddStream(p0: MediaStream?) {}
@@ -75,35 +85,58 @@ class WebRTCManager(private val context: Context) {
                 override fun onAddTrack(p0: RtpReceiver?, p1: Array<out MediaStream>?) {}
             }
         )
-        
-        peerConnection?.addTrack(localVideoTrack)
-        peerConnections.add(peerConnection!!)
+
+        if (peerConnection == null) {
+            cont.resume(Pair("", ""))
+            return@suspendCoroutine
+        }
+
+        peerConnection.addTrack(localVideoTrack)
+        peerConnectionsById[id] = peerConnection
+
+        peerConnection.createOffer(object : SdpObserver {
+            override fun onCreateSuccess(offer: SessionDescription?) {
+                peerConnection.setLocalDescription(object : SdpObserver {
+                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                    override fun onSetSuccess() {
+                        // ICE gathering starts; wait for onIceGatheringChange(COMPLETE)
+                    }
+                    override fun onCreateFailure(p0: String?) {
+                        if (resumed.compareAndSet(false, true)) cont.resume(Pair("", ""))
+                    }
+                    override fun onSetFailure(p0: String?) {
+                        if (resumed.compareAndSet(false, true)) cont.resume(Pair("", ""))
+                    }
+                }, offer)
+            }
+            override fun onSetSuccess() {}
+            override fun onCreateFailure(p0: String?) {
+                if (resumed.compareAndSet(false, true)) cont.resume(Pair("", ""))
+            }
+            override fun onSetFailure(p0: String?) {
+                if (resumed.compareAndSet(false, true)) cont.resume(Pair("", ""))
+            }
+        }, MediaConstraints())
+    }
+
+    // Sets the client's answer SDP as remote description for the given peer connection id.
+    suspend fun processAnswer(id: String, answerSdp: String): Boolean = suspendCoroutine { cont ->
+        val peerConnection = peerConnectionsById[id]
+        if (peerConnection == null) {
+            cont.resume(false)
+            return@suspendCoroutine
+        }
 
         peerConnection.setRemoteDescription(object : SdpObserver {
             override fun onCreateSuccess(p0: SessionDescription?) {}
-            override fun onSetSuccess() {
-                peerConnection.createAnswer(object : SdpObserver {
-                    override fun onCreateSuccess(answer: SessionDescription?) {
-                         peerConnection.setLocalDescription(object : SdpObserver {
-                             override fun onCreateSuccess(p0: SessionDescription?) {}
-                             override fun onSetSuccess() {
-                                 cont.resume(answer?.description ?: "")
-                             }
-                             override fun onCreateFailure(p0: String?) {
-                                 cont.resume("")
-                             }
-                             override fun onSetFailure(p0: String?) {
-                                 cont.resume("")
-                             }
-                         }, answer)
-                    }
-                    override fun onSetSuccess() {}
-                    override fun onCreateFailure(p0: String?) { cont.resume("") }
-                    override fun onSetFailure(p0: String?) { cont.resume("") }
-                }, MediaConstraints())
-            }
-            override fun onCreateFailure(p0: String?) { cont.resume("") }
-            override fun onSetFailure(p0: String?) { cont.resume("") }
-        }, SessionDescription(SessionDescription.Type.OFFER, offerSdp))
+            override fun onSetSuccess() { cont.resume(true) }
+            override fun onCreateFailure(p0: String?) { cont.resume(false) }
+            override fun onSetFailure(p0: String?) { cont.resume(false) }
+        }, SessionDescription(SessionDescription.Type.ANSWER, answerSdp))
+    }
+
+    // Adds a remote ICE candidate from the client to the given peer connection.
+    fun addIceCandidate(id: String, candidate: IceCandidate) {
+        peerConnectionsById[id]?.addIceCandidate(candidate)
     }
 }
