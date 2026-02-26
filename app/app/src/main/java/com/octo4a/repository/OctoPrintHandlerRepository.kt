@@ -302,6 +302,7 @@ class OctoPrintHandlerRepositoryImpl(
         val map = getConfig()
         map["webcam"] = mapOf(
             "stream" to "http://${context.ipAddress}:5001/mjpeg",
+            "webrtc" to "http://${context.ipAddress}:5001/webrtc",
             "ffmpeg" to "/usr/bin/ffmpeg",
             "snapshot" to "http://localhost:5001/snapshot"
         )

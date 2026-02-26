@@ -130,6 +130,9 @@ dependencies {
     // Bugsnag bug reporting
     implementation("com.bugsnag:bugsnag-android:5.12.0")
 
+    // WebRTC
+    implementation("org.webrtc:google-webrtc:1.0.32006")
+
     // Test dependencies
     testImplementation("junit:junit:4.13")
     androidTestImplementation("androidx.test.ext:junit:1.1.2")

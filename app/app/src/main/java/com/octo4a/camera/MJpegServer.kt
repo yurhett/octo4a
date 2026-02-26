@@ -18,6 +18,7 @@ interface MJpegFrameProvider {
     fun getNewFrame(prevFrame: FrameInfo?): FrameInfo
     fun registerListener(): Boolean
     fun unregisterListener()
+    suspend fun processWebRTCOffer(offerSdp: String): String
 }
 
 // Simple http server hosting mjpeg stream along with
@@ -49,10 +50,50 @@ class MJpegServer(port: Int, private val frameProvider: MJpegFrameProvider): Nan
             "/mjpeg" -> {
                 return MjpegResponse(frameProvider)
             }
+            "/webrtc" -> {
+                if (session.method == Method.POST) {
+                    val map = HashMap<String, String>()
+                    try {
+                        session.parseBody(map)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    val postData = map["postData"] ?: ""
+
+                    var offerSdp = postData
+                    var isJson = false
+                    if (postData.trim().startsWith("{")) {
+                        isJson = true
+                        try {
+                            val jsonObj = org.json.JSONObject(postData)
+                            offerSdp = jsonObj.optString("sdp", "")
+                        } catch (e: Exception) {}
+                    }
+
+                    var answerSdp = ""
+                    kotlin.runCatching {
+                        runBlocking {
+                            answerSdp = frameProvider.processWebRTCOffer(offerSdp)
+                        }
+                    }
+
+                    if (isJson) {
+                        try {
+                            val responseObj = org.json.JSONObject()
+                            responseObj.put("type", "answer")
+                            responseObj.put("sdp", answerSdp)
+                            return newFixedLengthResponse(Response.Status.OK, "application/json", responseObj.toString())
+                        } catch (e: Exception) {}
+                    }
+                    return newFixedLengthResponse(Response.Status.OK, "application/json", answerSdp)
+                }
+                return newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "Bad Request")
+            }
             else -> return newFixedLengthResponse(
                 "<html><body>"
                         + "<h1>GET /snapshot</h1><p>GET a current JPEG image.</p>"
                         + "<h1>GET /mjpeg</h1><p>GET MJPEG frames.</p>"
+                        + "<h1>POST /webrtc</h1><p>POST WebRTC SDP Offer.</p>"
                         + "</body></html>"
             )
         }

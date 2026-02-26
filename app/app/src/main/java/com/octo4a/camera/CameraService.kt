@@ -102,6 +102,7 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
   private val nativeUtils by lazy { NativeCameraUtils() }
 
   private val _mjpegServer by lazy { MJpegServer(5001, this) }
+  private val _webRTCManager by lazy { WebRTCManager(this) }
   private val _callbackExecutorPool by lazy { Executors.newCachedThreadPool() }
   private var _lastImageMilliseconds = System.currentTimeMillis()
 
@@ -286,6 +287,10 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     fun getService(): CameraService = this@CameraService
   }
 
+  override suspend fun processWebRTCOffer(offerSdp: String): String {
+      return _webRTCManager.processOffer(offerSdp)
+  }
+
   private val binder = LocalBinder()
 
   override suspend fun takeSnapshot(): ByteArray = suspendCoroutine {
@@ -342,6 +347,9 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     val isI420 = (image.planes[1].pixelStride == 1)
     var nv21: ByteArray =
         if (isI420) nativeUtils.yuvToNv21Slow(image) else nativeUtils.toNv21(image)!!
+        
+    _webRTCManager.pushFrame(nv21, image.width, image.height, image.imageInfo.rotationDegrees)
+
     var realWidth = image.width
     var realHeight = image.height
 
@@ -432,6 +440,7 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
   override fun onCreate() {
     super.onCreate()
     initCameraProvider()
+    _webRTCManager.init()
   }
 
   @SuppressLint("UnsafeExperimentalUsageError")
