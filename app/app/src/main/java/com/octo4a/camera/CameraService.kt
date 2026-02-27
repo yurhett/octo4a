@@ -41,6 +41,7 @@ import com.octo4a.utils.CancelableTimer
 import com.octo4a.utils.WaitableEvent
 import com.octo4a.utils.preferences.MainPreferences
 import org.koin.android.ext.android.inject
+import org.webrtc.IceCandidate
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
@@ -102,6 +103,7 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
   private val nativeUtils by lazy { NativeCameraUtils() }
 
   private val _mjpegServer by lazy { MJpegServer(5001, this) }
+  private val _webRTCManager by lazy { WebRTCManager(this) }
   private val _callbackExecutorPool by lazy { Executors.newCachedThreadPool() }
   private var _lastImageMilliseconds = System.currentTimeMillis()
 
@@ -286,6 +288,18 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     fun getService(): CameraService = this@CameraService
   }
 
+  override suspend fun createWebRTCOffer(): Pair<String, String> {
+      return _webRTCManager.createOffer()
+  }
+
+  override suspend fun processWebRTCAnswer(id: String, answerSdp: String): Boolean {
+      return _webRTCManager.processAnswer(id, answerSdp)
+  }
+
+  override fun addWebRTCIceCandidate(id: String, sdpMid: String?, sdpMLineIndex: Int, sdpCandidate: String) {
+      _webRTCManager.addIceCandidate(id, IceCandidate(sdpMid, sdpMLineIndex, sdpCandidate))
+  }
+
   private val binder = LocalBinder()
 
   override suspend fun takeSnapshot(): ByteArray = suspendCoroutine {
@@ -342,6 +356,9 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     val isI420 = (image.planes[1].pixelStride == 1)
     var nv21: ByteArray =
         if (isI420) nativeUtils.yuvToNv21Slow(image) else nativeUtils.toNv21(image)!!
+        
+    _webRTCManager.pushFrame(nv21, image.width, image.height, image.imageInfo.rotationDegrees)
+
     var realWidth = image.width
     var realHeight = image.height
 
@@ -432,6 +449,14 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
   override fun onCreate() {
     super.onCreate()
     initCameraProvider()
+    _webRTCManager.init()
+    _webRTCManager.onStreamActiveStatusChanged = { active ->
+      if (active) {
+        registerListener()
+      } else {
+        unregisterListener()
+      }
+    }
   }
 
   @SuppressLint("UnsafeExperimentalUsageError")

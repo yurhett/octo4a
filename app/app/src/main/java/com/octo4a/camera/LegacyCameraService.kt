@@ -19,6 +19,7 @@ import com.octo4a.repository.LoggerRepository
 import com.octo4a.repository.OctoPrintHandlerRepository
 import com.octo4a.utils.preferences.MainPreferences
 import org.koin.android.ext.android.inject
+import org.webrtc.IceCandidate
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 import kotlin.coroutines.suspendCoroutine
@@ -39,6 +40,18 @@ class LegacyCameraService : LifecycleService(), MJpegFrameProvider, SurfaceHolde
 
     override fun getNewFrame(prevFrame: MJpegFrameProvider.FrameInfo?): MJpegFrameProvider.FrameInfo {
       return MJpegFrameProvider.FrameInfo(latestFrame, id=-1)
+  }
+
+  override suspend fun createWebRTCOffer(): Pair<String, String> {
+      return webRTCManager.createOffer()
+  }
+
+  override suspend fun processWebRTCAnswer(id: String, answerSdp: String): Boolean {
+      return webRTCManager.processAnswer(id, answerSdp)
+  }
+
+  override fun addWebRTCIceCandidate(id: String, sdpMid: String?, sdpMLineIndex: Int, sdpCandidate: String) {
+      webRTCManager.addIceCandidate(id, IceCandidate(sdpMid, sdpMLineIndex, sdpCandidate))
   }
 
     inner class LocalBinder : Binder() {
@@ -70,6 +83,7 @@ class LegacyCameraService : LifecycleService(), MJpegFrameProvider, SurfaceHolde
     }
 
     private val mjpegServer by lazy { MJpegServer(5001, this) }
+    private val webRTCManager by lazy { WebRTCManager(this) }
 
     private val callbackExecutorPool = Executors.newCachedThreadPool()
 
@@ -90,6 +104,14 @@ class LegacyCameraService : LifecycleService(), MJpegFrameProvider, SurfaceHolde
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         readyCamera()
+        webRTCManager.init()
+        webRTCManager.onStreamActiveStatusChanged = { active ->
+            if (active) {
+                registerListener()
+            } else {
+                unregisterListener()
+            }
+        }
         Thread {
             mjpegServer.startServer()
         }.start()
@@ -143,6 +165,7 @@ class LegacyCameraService : LifecycleService(), MJpegFrameProvider, SurfaceHolde
             val rect = Rect(0, 0, camera.parameters.previewSize.width, camera.parameters.previewSize.height)
             val out = ByteArrayOutputStream()
             camera.setPreviewCallback { bytes, cam ->
+                webRTCManager.pushFrame(bytes, cam.parameters.previewSize.width, cam.parameters.previewSize.height, 0)
 
                 val bitmap = nv21ToBitmap(bytes, cam.parameters.previewSize.width, cam.parameters.previewSize.height)
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
