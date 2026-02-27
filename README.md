@@ -3,6 +3,8 @@
 ![GitHub Sponsors](https://img.shields.io/github/sponsors/feelfreelinux)
 ![IzzySoft](https://img.shields.io/endpoint?url=https://apt.izzysoft.de/fdroid/api/v1/shield/com.octo4a)
 
+### TLDR: This fork supports WebRTC camera streaming, which is more stable and efficient than the original MJPEG streaming. Download ![Here](https://github.com/yurhett/octo4a/releases/tag/2.1.0-webrtc)
+
 
 ![A banner visually expaining how the app works](.github/readme-banner.png)
 
