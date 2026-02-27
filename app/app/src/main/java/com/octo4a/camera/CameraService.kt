@@ -450,6 +450,13 @@ class CameraService : LifecycleService(), MJpegFrameProvider {
     super.onCreate()
     initCameraProvider()
     _webRTCManager.init()
+    _webRTCManager.onStreamActiveStatusChanged = { active ->
+      if (active) {
+        registerListener()
+      } else {
+        unregisterListener()
+      }
+    }
   }
 
   @SuppressLint("UnsafeExperimentalUsageError")

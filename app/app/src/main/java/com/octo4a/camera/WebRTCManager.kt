@@ -16,6 +16,25 @@ class WebRTCManager(private val context: Context) {
 
     private val peerConnectionsById = ConcurrentHashMap<String, PeerConnection>()
 
+    var onStreamActiveStatusChanged: ((Boolean) -> Unit)? = null
+    private val activePeerIds = ConcurrentHashMap.newKeySet<String>()
+
+    private fun updatePeerStatus(id: String, connected: Boolean) {
+        val wasEmpty = activePeerIds.isEmpty()
+        if (connected) {
+            activePeerIds.add(id)
+        } else {
+            activePeerIds.remove(id)
+            peerConnectionsById.remove(id)?.close()
+        }
+        val isEmpty = activePeerIds.isEmpty()
+        if (wasEmpty && !isEmpty) {
+            onStreamActiveStatusChanged?.invoke(true)
+        } else if (!wasEmpty && isEmpty) {
+            onStreamActiveStatusChanged?.invoke(false)
+        }
+    }
+
     fun init() {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context)
@@ -68,7 +87,15 @@ class WebRTCManager(private val context: Context) {
             PeerConnection.RTCConfiguration(emptyList()),
             object : PeerConnection.Observer {
                 override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-                override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+                override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+                    if (state == PeerConnection.IceConnectionState.CONNECTED) {
+                        updatePeerStatus(id, true)
+                    } else if (state == PeerConnection.IceConnectionState.DISCONNECTED ||
+                        state == PeerConnection.IceConnectionState.FAILED ||
+                        state == PeerConnection.IceConnectionState.CLOSED) {
+                        updatePeerStatus(id, false)
+                    }
+                }
                 override fun onIceConnectionReceivingChange(p0: Boolean) {}
                 override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {
                     if (state == PeerConnection.IceGatheringState.COMPLETE && resumed.compareAndSet(false, true)) {

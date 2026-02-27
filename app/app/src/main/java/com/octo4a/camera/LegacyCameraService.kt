@@ -105,6 +105,13 @@ class LegacyCameraService : LifecycleService(), MJpegFrameProvider, SurfaceHolde
         super.onStartCommand(intent, flags, startId)
         readyCamera()
         webRTCManager.init()
+        webRTCManager.onStreamActiveStatusChanged = { active ->
+            if (active) {
+                registerListener()
+            } else {
+                unregisterListener()
+            }
+        }
         Thread {
             mjpegServer.startServer()
         }.start()
